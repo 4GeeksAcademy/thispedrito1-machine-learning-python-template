@@ -1,112 +1,139 @@
-# Data Science Project Boilerplate
+# Análisis de Sentimiento en Reseñas de Clientes — WeLoveReviews
 
-This boilerplate is designed to kickstart data science projects by providing a basic setup for database connections, data processing, and machine learning model development. It includes a structured folder organization for your datasets and a set of pre-defined Python packages necessary for most data science tasks.
+<!-- hide -->
 
-## Structure
+Por [@marcogonzalo](https://github.com/marcogonzalo) y [otros contribuidores](https://github.com/4GeeksAcademy/repo-name/graphs/contributors) en [4Geeks Academy](https://4geeksacademy.com/)
 
-The project is organized as follows:
+[![build by developers](https://img.shields.io/badge/build_by-Developers-blue)](https://4geeks.com)
+[![4Geeks Academy](https://img.shields.io/twitter/follow/4geeksacademy?style=social&logo=x)](https://x.com/4geeksacademy)
 
-- **`src/app.py`** → Main Python script where your project will run.
-- **`src/explore.ipynb`** → Notebook for exploration and testing. Once exploration is complete, migrate the clean code to `app.py`.
-- **`src/utils.py`** → Auxiliary functions, such as database connection.
-- **`requirements.txt`** → List of required Python packages.
-- **`models/`** → Will contain your SQLAlchemy model classes.
-- **`data/`** → Stores datasets at different stages:
-  - **`data/raw/`** → Raw data.
-  - **`data/interim/`** → Temporarily transformed data.
-  - **`data/processed/`** → Data ready for analysis.
+_These instructions are [available in English](./README.md)._
 
+**Antes de comenzar**: 📗 [Lee las instrucciones](https://4geeks.com/lesson/how-to-start-a-project) sobre cómo iniciar un proyecto de código.
 
-## ⚡ Initial Setup in Codespaces (Recommended)
+<!-- endhide -->
 
-No manual setup is required, as **Codespaces is automatically configured** with the predefined files created by the academy for you. Just follow these steps:
+---
 
-1. **Wait for the environment to configure automatically**.
-   - All necessary packages and the database will install themselves.
-   - The automatically created `username` and `db_name` are in the **`.env`** file at the root of the project.
-2. **Once Codespaces is ready, you can start working immediately**.
+## 🎯 Tu reto
 
+Trabajas como ingeniero/a de IA freelance para una pequeña consultora de datos. Tu último cliente, **WeLoveReviews**, ayuda a empresas a entender lo que realmente piensan sus clientes. Acaban de incorporar una nueva cuenta: un negocio con una puntuación promedio de **4.5 / 5**, pero la account manager tiene una duda que no la deja tranquila — _¿el sentimiento expresado en las reseñas escritas realmente coincide con esa puntuación?_ Antes de entregarle un reporte a su cliente, quieren una segunda opinión basada en datos, no en intuición.
 
-## 💻 Local Setup (Only if you can't use Codespaces)
+No tienes tiempo (ni los datos) para entrenar un modelo desde cero — y no lo necesitas. Hay muchos modelos preentrenados en Hugging Face que ya saben leer sentimiento en texto. Tu trabajo es explorar los datos, integrar uno correctamente, validar su resultado contra la realidad, y convertir texto crudo en algo que la account manager pueda realmente usar.
 
-**Prerequisites**
+> La account manager te compartió esto por correo:
+>
+> "Le vamos a entregar a este cliente 500 reseñas escritas la próxima semana. Necesito saber, en términos simples, cuántas de estas reseñas se leen como positivas, neutrales o negativas — y si esa distribución coincide con su promedio de 4.5 estrellas. Si hay una diferencia, quiero entender de dónde viene antes de ponerlo frente al cliente."
 
-Make sure you have Python 3.11+ installed on your machine. You will also need pip to install the Python packages.
+---
 
-**Installation**
+## 📓 Cómo se comunica este equipo
 
-Clone the project repository to your local machine.
+En este equipo, los líderes tratan los **notebooks de Jupyter como documentos de comunicación** para análisis y procesamiento de datos — no como borradores descartables. Tu entregable narrativo es **`src/explore.ipynb`**: un notebook ejecutado que guía al lector desde los objetivos hasta la exploración, los insights, las decisiones de modelado, los resultados y las conclusiones. Se espera markdown breve entre bloques de código importantes; el notebook debe sostenerse por sí solo sin un informe markdown aparte para el cliente.
 
-Navigate to the project directory and install the required Python packages:
+> **Orden de trabajo:** Puedes ejecutar primero el prompt de EDA y luego anteponer los objetivos y continuar con el resto del proyecto en el **mismo** `src/explore.ipynb`, para que el archivo final siga el arco completo descrito abajo.
 
-```bash
-pip install -r requirements.txt
-```
+---
 
-**Create a database (if necessary)**
+## 🤖 Nota sobre el modelo
 
-Create a new database within the Postgres engine by customizing and executing the following command:
+**Modelo a utilizar:** [`nlptown/bert-base-multilingual-uncased-sentiment`](https://huggingface.co/nlptown/bert-base-multilingual-uncased-sentiment) de Hugging Face.
 
-```bash
-$ psql -U postgres -c "DO \$\$ BEGIN 
-    CREATE USER my_user WITH PASSWORD 'my_password'; 
-    CREATE DATABASE my_database OWNER my_user; 
-END \$\$;"
-```
-Connect to the Postgres engine to use your database, manipulate tables, and data:
+> ⚠️ **Desajuste de dominio:** Este modelo fue fine-tuneado sobre **reseñas de productos** (p. ej. estilo Amazon). Tu dataset contiene **reseñas de servicios** — los clientes hablan del personal, tiempos de espera y ambiente. Ese desajuste puede producir **falsos negativos**: reseñas que a un humano leen como positivas (o tienen alta puntuación en estrellas) pero el modelo las clasifica con bajo sentimiento. Debes usar este modelo primero de todos modos — encontrar y explicar esos falsos negativos es parte del ejercicio.
 
-```bash
-$ psql -U my_user -d my_database
-```
+Este modelo predice el sentimiento como una **puntuación de 1 a 5 estrellas** (no una etiqueta simple POSITIVO/NEGATIVO). Mapea la salida a bandas de sentimiento:
 
-Once inside PSQL, you can create tables, run queries, insert, update, or delete data, and much more!
+| Predicción del modelo | Banda de sentimiento |
+| --------------------- | -------------------- |
+| 1–2 estrellas         | Negativo             |
+| 3 estrellas           | Neutral              |
+| 4–5 estrellas         | Positivo             |
 
-**Environment Variables**
+**Reglas de integración:**
 
-Create a .env file in the root directory of the project to store your environment variables, such as your database connection string:
+- Carga el modelo con `pipeline()` o `from_pretrained()` — **no** descargues los pesos y los subas al repositorio.
+- Carga el modelo **una sola vez** antes del loop de inferencia, no dentro de un loop por reseña.
+- **Fija** (pin) el nombre/versión del modelo en tu código — no dependas silenciosamente de lo que sea que "latest" resuelva cuando otra persona clone tu repo.
 
-```makefile
-DATABASE_URL="postgresql://<USER>:<PASSWORD>@<HOST>:<PORT>/<DB_NAME>"
+---
 
-#example
-DATABASE_URL="postgresql://my_user:my_password@localhost:5432/my_database"
-```
+## 🌱 Cómo Iniciar el Proyecto
 
-## Running the Application
+1. Haz fork del repositorio [machine-learning-python-template](https://github.com/4GeeksAcademy/machine-learning-python-template) y, si tienes la opción, selecciona la cuenta de 4GeeksAcademy.
+2. Ábrelo en GitHub Codespaces, o clónalo localmente si prefieres trabajar en tu propia máquina.
+3. Descarga el archivo [reviews.csv](https://github.com/4GeeksAcademy/ai-engineering-syllabus/blob/main/content/projects/existing-model-sentiment-analysis-reviews/reviews.csv) desde la plataforma y colócalo en **`data/raw/reviews.csv`** en tu repositorio.
+4. Extiende **`requirements.txt`** con `transformers` y `torch` (o el backend que elijas) — **fija las versiones**.
+5. Lee las [instrucciones completas sobre cómo iniciar un proyecto de código](https://4geeks.com/lesson/how-to-start-a-project) si esto es nuevo para ti.
 
-To run the application, execute the app.py script from the root directory of the project:
+---
 
-```bash
-python src/app.py
-```
+## 🧪 EDA con tu agente de código
 
-## Adding Models
+Antes de modelar, explora el dataset con ayuda de tu agente de código:
 
-To add SQLAlchemy model classes, create new Python script files within the models/ directory. These classes should be defined according to your database schema.
+1. Abre **[PROMPT.es.md](./PROMPT.es.md)** en la carpeta de este proyecto.
+2. Copia todo lo que está debajo de la línea del encabezado en tu agente (Cursor, Copilot, Claude Code, etc.).
+3. Deja que el agente trabaje en la **sección de EDA** de **`src/explore.ipynb`** — solo exploración, insights y propuesta de limpieza.
 
-Example model definition (`models/example_model.py`):
+El prompt se detiene después de la EDA. Todo lo que sigue abajo es tu responsabilidad en el mismo notebook y en `src/app.py`.
 
-```py
-from sqlalchemy.orm import declarative_base
-from sqlalchemy import String
-from sqlalchemy.orm import Mapped, mapped_column
+---
 
-Base = declarative_base()
+## 💻 Qué Debes Hacer
 
-class ExampleModel(Base):
-    __tablename__ = 'example_table'
-    id: Mapped[int] = mapped_column(primary_key=True)
-    username: Mapped[str] = mapped_column(unique=True)
-```
+Completa el arco completo del notebook en **`src/explore.ipynb`** (con **salidas ejecutadas**):
 
-## Working with Data
+- [ ] **Objetivos** — enmarca la pregunta de negocio (sentimiento escrito vs promedio de 4.5 estrellas).
+- [ ] **EDA / insights / limpieza** — usa la salida del prompt del agente; markdown breve entre pasos.
+- [ ] **Plan de acción + justificación del modelo** — justifica los siguientes pasos a partir de tus insights; comprométete con el modelo `nlptown` fijo y el mapeo descrito arriba.
+- [ ] **Inferencia sobre las 500 reseñas** — carga el modelo una sola vez; guarda estrellas predichas y bandas de sentimiento por reseña.
+- [ ] **Desglose vs promedio de 4.5 estrellas** — calcula % positivo / neutral / negativo; compáralo con la puntuación del negocio; explica las diferencias.
+- [ ] **Falsos negativos** — encuentra reseñas donde el modelo predice 1–2 estrellas pero la puntuación humana es 4–5 (o donde tú lees el texto como positivo/neutral pero el modelo no está de acuerdo); documenta ejemplos y patrones compartidos.
+- [ ] **Muestra manual (15–20 reseñas)** — inspecciona predicciones a mano; anota casos donde la etiqueta parezca incorrecta.
+- [ ] **Conclusiones** — takeaway en lenguaje claro que la account manager pueda usar.
 
-You can place your raw datasets in the data/raw directory, intermediate datasets in data/interim, and processed datasets ready for analysis in data/processed.
+**Entregables de producción:**
 
-To process data, you can modify the app.py script to include your data processing steps, using pandas for data manipulation and analysis.
+- [ ] Migra la lógica de inferencia limpia a **`src/app.py`** (patrón del template: notebook para la historia, script para producción).
+- [ ] Escribe la salida enriquecida en **`data/processed/reviews_with_sentiment.csv`**.
+- [ ] Fija las dependencias en **`requirements.txt`**.
 
-## Contributors
+---
 
-This template was built as part of the [Data Science and Machine Learning Bootcamp](https://4geeksacademy.com/us/coding-bootcamps/datascience-machine-learning) by 4Geeks Academy by [Alejandro Sanchez](https://twitter.com/alesanchezr) and many other contributors. Learn more about [4Geeks Academy BootCamp programs](https://4geeksacademy.com/us/programs) here.
+## ✅ Qué Vamos a Evaluar
 
-Other templates and resources like this can be found on the school's GitHub page.
+- [ ] **`src/explore.ipynb`** se entrega **con salidas ejecutadas** y un arco narrativo claro: objetivos → EDA → limpieza → plan/modelo → resultados/conclusiones.
+- [ ] Aparece markdown transicional breve entre bloques de código importantes.
+- [ ] El modelo está integrado mediante `pipeline()`/`from_pretrained()` — los pesos del modelo **no** están subidos al repositorio.
+- [ ] Las 500 reseñas fueron procesadas y tienen una predicción de sentimiento asociada.
+- [ ] La versión/nombre del modelo está fijada (pinned), no dependiendo de "latest".
+- [ ] El modelo se carga una sola vez y se reutiliza, no se recarga en cada reseña.
+- [ ] Se calcula la distribución de sentimiento y se compara explícitamente con el promedio de 4.5 estrellas.
+- [ ] Hay evidencia de verificación manual — ejemplos específicos de predicciones revisadas a mano, con notas sobre si tenían sentido.
+- [ ] Los falsos negativos están identificados y analizados — ejemplos documentados con una hipótesis sobre por qué el modelo de reseñas de productos clasificó mal texto de reseñas de servicios.
+- [ ] **`src/app.py`** ejecuta la ruta de inferencia de producción y escribe **`data/processed/reviews_with_sentiment.csv`**.
+- [ ] Las dependencias están fijadas en **`requirements.txt`**.
+
+> **Nota:** No estamos evaluando arquitectura, entrenamiento ni fine-tuning del modelo — estás integrando un modelo existente, no construyendo uno. **No** buscamos un informe markdown aparte para el cliente; el notebook es tu artefacto de comunicación.
+
+---
+
+## 📦 Cómo Entregar
+
+Sube tu código a tu propio repositorio de GitHub. Asegúrate de incluir **`src/explore.ipynb`** (con salidas), **`src/app.py`** y **`data/processed/reviews_with_sentiment.csv`** — no solo impresos en tu terminal y descartados. Entrega el link de tu repositorio siguiendo el proceso de entrega de tu instructor.
+
+---
+
+## 🔍 Extensión Opcional: Encuentra un Mejor Modelo
+
+Una vez completado el análisis anterior, prueba esto por tu cuenta:
+
+1. Ejecuta [`tabularisai/multilingual-sentiment-analysis`](https://huggingface.co/tabularisai/multilingual-sentiment-analysis) sobre las mismas 500 reseñas.
+2. Compara: ¿baja la tasa de falsos negativos? ¿Qué reseñas siguen fallando?
+3. Escribe un breve addendum **dentro del mismo `src/explore.ipynb`** recomendando si WeLoveReviews debería cambiar de modelo para este cliente — y por qué.
+
+Este paso no se evalúa, pero es el tipo de trabajo que separa a quien integra modelos de un/a ingeniero/a de IA que entiende la **selección de modelos**.
+
+---
+
+Este y muchos otros proyectos son construidos por estudiantes como parte de los [Coding Bootcamps](https://4geeksacademy.com/) de 4Geeks Academy. Encuentra más acerca de los [cursos](https://4geeksacademy.com/es/comparar-programas) de [Ingeniería de IA](https://4geeksacademy.com/es/coding-bootcamps/ingenieria-ia), [Data Science & Machine Learning](https://4geeksacademy.com/es/coding-bootcamps/curso-datascience-machine-learning), [Ciberseguridad](https://4geeksacademy.com/es/coding-bootcamps/curso-ciberseguridad) y [Full-Stack Software Developer con IA](https://4geeksacademy.com/es/coding-bootcamps/programador-full-stack).
