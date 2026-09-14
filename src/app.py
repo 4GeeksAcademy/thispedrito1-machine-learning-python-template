@@ -1,14 +1,18 @@
+import json
 import random
 import shutil
 import zipfile
 from pathlib import Path
 from urllib.request import urlretrieve
 
+import numpy as np
+from keras import ops
 from keras.applications import EfficientNetB0
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 from keras.layers import Dense, GlobalAveragePooling2D, Input
+from keras.losses import categorical_crossentropy
 from keras.models import Sequential, load_model
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 # Keras 3 no longer exports ImageDataGenerator; TensorFlow still exposes the legacy class.
 from tensorflow.keras.preprocessing.image import DirectoryIterator, ImageDataGenerator
 
@@ -22,6 +26,7 @@ TRAIN_PATH = DATASET_PATH / "train"
 TEST_PATH = DATASET_PATH / "test"
 MODELS_PATH = PROJECT_ROOT / "models"
 BEST_MODEL_PATH = MODELS_PATH / "efficientnet_dogs_vs_cats.keras"
+HISTORY_PATH = MODELS_PATH / "training_history.json"
 
 CLASSES = ["cat", "dog"]
 IMAGE_SIZE = (224, 224)
@@ -152,20 +157,52 @@ def build_callbacks(checkpoint_path: Path = BEST_MODEL_PATH) -> list:
 
 
 def evaluate_model(model_path: Path = BEST_MODEL_PATH, tsdata: DirectoryIterator | None = None) -> dict:
-    """Load the saved best model and measure it on the untouched test set."""
+    """Load the saved best model and predict the untouched test set in a single pass.
+
+    tsdata must not shuffle, so the predictions line up with tsdata.classes and
+    tsdata.filepaths. The loss is the same categorical cross-entropy used in training.
+    """
     if tsdata is None:
         _, _, tsdata = build_generators()
     best_model = load_model(model_path)
-    test_loss, test_accuracy = best_model.evaluate(tsdata, verbose=0)
-    predictions = best_model.predict(tsdata, verbose=0).argmax(axis=1)
+    probabilities = best_model.predict(tsdata, verbose=0)
+    predictions = probabilities.argmax(axis=1)
+    labels = tsdata.classes
+    one_hot_labels = np.eye(len(CLASSES))[labels]
     return {
-        "test_loss": test_loss,
-        "test_accuracy": test_accuracy,
+        "test_loss": float(ops.convert_to_numpy(categorical_crossentropy(one_hot_labels, probabilities)).mean()),
+        "test_accuracy": float(accuracy_score(labels, predictions)),
         "report": classification_report(
-            tsdata.classes, predictions, target_names=CLASSES, output_dict=True, zero_division=0
+            labels, predictions, target_names=CLASSES, output_dict=True, zero_division=0
         ),
-        "confusion_matrix": confusion_matrix(tsdata.classes, predictions).tolist(),
+        "confusion_matrix": confusion_matrix(labels, predictions).tolist(),
+        "labels": labels,
+        "predictions": predictions,
+        "probabilities": probabilities,
+        "filepaths": tsdata.filepaths,
     }
+
+
+def save_training_summary(
+    history: dict,
+    results: dict,
+    image_counts: dict,
+    output_path: Path = HISTORY_PATH,
+) -> dict:
+    """Store per-epoch metrics and test scores so they can be plotted without retraining."""
+    summary = {
+        "history": {
+            metric: [float(value) for value in history[metric]]
+            for metric in ("loss", "accuracy", "val_loss", "val_accuracy")
+        },
+        "best_epoch": int(np.argmin(history["val_loss"])) + 1,
+        "test_loss": results["test_loss"],
+        "test_accuracy": results["test_accuracy"],
+        "images": image_counts,
+    }
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(summary, indent=2) + "\n")
+    return summary
 
 
 def run_pipeline(epochs: int = EPOCHS) -> dict:
@@ -181,20 +218,17 @@ def run_pipeline(epochs: int = EPOCHS) -> dict:
     )
 
     results = evaluate_model(BEST_MODEL_PATH, tsdata)
-    results["history"] = history.history
-    results["train_images"] = trdata.samples
-    results["validation_images"] = valdata.samples
-    results["test_images"] = tsdata.samples
-    return results
+    image_counts = {"train": trdata.samples, "validation": valdata.samples, "test": tsdata.samples}
+    summary = save_training_summary(history.history, results, image_counts)
+    return {**results, **summary}
 
 
 if __name__ == "__main__":
     results = run_pipeline()
-    print(
-        f"Images: train={results['train_images']}, "
-        f"validation={results['validation_images']}, test={results['test_images']}"
-    )
-    print(f"Epochs run: {len(results['history']['loss'])}")
+    images = results["images"]
+    print(f"Images: train={images['train']}, validation={images['validation']}, test={images['test']}")
+    print(f"Epochs run: {len(results['history']['loss'])} (best: {results['best_epoch']})")
     print(f"Test loss: {results['test_loss']:.4f}")
     print(f"Test accuracy: {results['test_accuracy']:.3f}")
     print(f"Best model saved to: {BEST_MODEL_PATH}")
+    print(f"Training history saved to: {HISTORY_PATH}")
