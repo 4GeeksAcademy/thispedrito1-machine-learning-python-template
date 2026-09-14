@@ -1,3 +1,10 @@
 __pycache__
 .env
 .learn
+.venv
+.DS_Store
+logs/
+
+# Dataset de imágenes (25.000 fotos, demasiado pesado para GitHub)
+data/raw/dogs-vs-cats.zip
+data/interim/dogs-vs-cats*
